@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>The Trading Game (Prototype)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background: #0b1020; color: #e8ecff; }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 18px; }
+    h1 { font-size: 20px; margin: 0 0 10px; }
+    .row { display: grid; grid-template-columns: 1.2fr 1fr; gap: 14px; align-items: start; }
+    .card { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; padding: 14px; }
+    .muted { opacity: 0.8; }
+    .pill { display: inline-block; padding: 4px 10px; border-radius: 999px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); font-size: 12px; }
+    .players { display: grid; gap: 10px; }
+    .p { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 10px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.20); }
+    .p.you { border-color: rgba(120,160,255,0.55); background: rgba(120,160,255,0.12); }
+    .p.dead { opacity: 0.45; }
+    .p .name { font-weight: 650; }
+    .p .sub { font-size: 12px; opacity: 0.85; }
+    .p .right { text-align: right; font-size: 12px; opacity: 0.9; }
+    .controls { display: grid; gap: 10px; }
+    .btnrow { display: flex; gap: 10px; flex-wrap: wrap; }
+    button { cursor: pointer; border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.08); color: #e8ecff; padding: 10px 12px; border-radius: 12px; font-weight: 600; }
+    button:hover { background: rgba(255,255,255,0.12); }
+    button:disabled { cursor: not-allowed; opacity: 0.5; }
+    input, select { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.14); background: rgba(0,0,0,0.35); color: #e8ecff; }
+    .log { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 12px;
+           white-space: pre-wrap; line-height: 1.35; max-height: 360px; overflow: auto; background: rgba(0,0,0,0.35); border-radius: 14px; padding: 10px; border: 1px solid rgba(255,255,255,0.12); }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .big { font-size: 18px; font-weight: 750; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>The Trading Game — v1 Prototype (Real Deck)</h1>
+
+    <div class="row">
+      <div class="card">
+        <div class="grid2">
+          <div>
+            <div class="muted">Round</div>
+            <div class="big" id="roundLabel">—</div>
+          </div>
+          <div>
+            <div class="muted">Current Bid</div>
+            <div class="big" id="bidLabel">—</div>
+          </div>
+        </div>
+        <div style="height:10px"></div>
+
+        <div class="players" id="players"></div>
+
+        <div style="height:12px"></div>
+        <div class="pill" id="turnLabel">—</div>
+      </div>
+
+      <div class="card">
+        <div class="controls">
+          <div class="grid2">
+            <div>
+              <div class="muted">Players</div>
+              <select id="playerCount">
+                <option value="4" selected>4 (You + 3 AI)</option>
+                <option value="3">3 (You + 2 AI)</option>
+              </select>
+            </div>
+            <div>
+              <div class="muted">AI Style</div>
+              <select id="aiStyle">
+                <option value="balanced" selected>Balanced</option>
+                <option value="safe">Safe</option>
+                <option value="spicy">Spicy</option>
+              </select>
+            </div>
+          </div>
+
+          <button id="newGameBtn">New Game</button>
+
+          <div class="card" style="padding:12px;">
+            <div class="muted">Your cards</div>
+            <div class="big" id="yourCards">—</div>
+            <div class="muted" style="margin-top:6px;">(You can only see your own cards.)</div>
+          </div>
+
+          <div class="card" style="padding:12px;">
+            <div class="muted">Deck (this round)</div>
+            <div class="big" id="deckLabel">—</div>
+            <div class="muted" style="margin-top:6px;">Deck is reshuffled each round: values 1–10, two copies each (20 cards).</div>
+          </div>
+
+          <div>
+            <div class="muted">Raise bid to (must be higher)</div>
+            <input id="bidInput" type="number" min="1" step="1" value="1" />
+          </div>
+
+          <div class="btnrow">
+            <button id="raiseBtn">Raise</button>
+            <button id="callBtn">Call</button>
+            <button id="autoBtn">Auto-play my turn</button>
+          </div>
+
+          <div class="muted" id="hint"></div>
+
+          <div>
+            <div class="muted">Log</div>
+            <div class="log" id="log"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const logEl = $("log");
+  const addLog = (msg) => { logEl.textContent = (msg + "\n") + logEl.textContent; };
+
+  // --- Utilities ---
+  const sum = (arr) => arr.reduce((a,b)=>a+b,0);
+
+  function shuffleInPlace(a) {
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  // --- Real Deck: values 1..10, two copies each (20 cards) ---
+  function freshDeck() {
+    const d = [];
+    for (let v = 1; v <= 10; v++) {
+      d.push(v);
+      d.push(v);
+    }
+    return shuffleInPlace(d);
+  }
+
+  function makePlayers(n) {
+    const players = [];
+    players.push({ id: 0, name: "You", alive: true, isYou: true, cards: [] });
+    for (let i = 1; i < n; i++) players.push({ id: i, name: `AI ${i}`, alive: true, isYou: false, cards: [] });
+    return players;
+  }
+
+  // --- Game State ---
+  let state = null;
+
+  function alivePlayers() { return state.players.filter(p => p.alive); }
+  function isGameOver() { return alivePlayers().length <= 1; }
+
+  function nextAliveIndex(fromIndex) {
+    const n = state.players.length;
+    for (let step = 1; step <= n; step++) {
+      const j = (fromIndex + step) % n;
+      if (state.players[j].alive) return j;
+    }
+    return fromIndex;
+  }
+
+  function maxPossibleTotal() {
+    const alive = alivePlayers().length;
+    return alive * 2 * 10;
+  }
+
+  // With a finite deck, these "min/max possible total" are not tight bounds (because the deck composition matters),
+  // but they’re still useful as quick heuristics for hints/AI.
+  function minPossibleTotalFor(player) {
+    const alive = alivePlayers().length;
+    return sum(player.cards) + (alive - 1) * 2;  // others min 1+1
+  }
+  function maxPossibleTotalFor(player) {
+    const alive = alivePlayers().length;
+    return sum(player.cards) + (alive - 1) * 20; // others max 10+10
+  }
+  function expectedTotalFor(player) {
+    // In THIS deck, expected card value is 5.5 (uniform 1..10 with equal counts),
+    // so expected two-card hand is 11, same as before.
+    const alive = alivePlayers().length;
+    return sum(player.cards) + (alive - 1) * 11;
+  }
+
+  function dealRound() {
+    state.deck = freshDeck();
+    const alive = alivePlayers();
+
+    const needed = alive.length * 2;
+    if (needed > state.deck.length) {
+      // Should never happen with 3–4 players, but safe guard.
+      addLog(`(Not enough cards to deal: need ${needed}, deck has ${state.deck.length})`);
+      return;
+    }
+
+    // Clear cards then deal
+    for (const p of state.players) p.cards = [];
+    for (const p of alive) {
+      p.cards = [state.deck.pop(), state.deck.pop()];
+    }
+
+    state.currentBid = 0;
+    state.lastBidder = null;
+    state.round += 1;
+
+    addLog(`--- Round ${state.round} ---`);
+    addLog(`Deck shuffled and cards dealt (hidden).`);
+  }
+
+  function render() {
+    $("roundLabel").textContent = `${state.round}`;
+    $("bidLabel").textContent = state.currentBid === 0 ? "—" : `${state.currentBid}`;
+
+    $("deckLabel").textContent = `${state.deck.length} cards remaining`;
+
+    const you = state.players[0];
+    $("yourCards").textContent = you.alive ? `${you.cards[0]} + ${you.cards[1]} (sum ${sum(you.cards)})` : "You are eliminated";
+
+    const current = state.players[state.turnIndex];
+    $("turnLabel").textContent = current ? `Turn: ${current.name}` : "—";
+
+    const playersEl = $("players");
+    playersEl.innerHTML = "";
+    for (const p of state.players) {
+      const div = document.createElement("div");
+      div.className = "p" + (p.isYou ? " you" : "") + (!p.alive ? " dead" : "");
+
+      const left = document.createElement("div");
+      const right = document.createElement("div");
+      right.className = "right";
+
+      const status = p.alive ? "Alive" : "Eliminated";
+      const last = (state.lastBidder && state.lastBidder.id === p.id) ? " (last bidder)" : "";
+      left.innerHTML = `<div class="name">${p.name}</div><div class="sub">${status}${last}</div>`;
+
+      if (p.isYou && p.alive) right.textContent = `Your view: ${p.cards[0]}, ${p.cards[1]}`;
+      else right.textContent = p.alive ? `Cards: ??, ??` : `—`;
+
+      div.appendChild(left);
+      div.appendChild(right);
+      playersEl.appendChild(div);
+    }
+
+    const yourTurn = state.players[state.turnIndex]?.isYou === true;
+    $("raiseBtn").disabled = !yourTurn || !state.players[0].alive;
+    $("callBtn").disabled  = !yourTurn || !state.players[0].alive || state.currentBid === 0;
+    $("autoBtn").disabled  = !yourTurn || !state.players[0].alive;
+
+    const maxT = maxPossibleTotal();
+    const minBid = state.currentBid + 1;
+    const bidInput = $("bidInput");
+    bidInput.min = String(Math.max(1, minBid));
+    bidInput.max = String(maxT);
+    if (Number(bidInput.value) < minBid) bidInput.value = String(minBid);
+
+    if (you.alive) {
+      const minT = minPossibleTotalFor(you);
+      const maxT2 = maxPossibleTotalFor(you);
+      const expT = expectedTotalFor(you);
+      $("hint").innerHTML =
+        `Your estimate: total between <span class="pill">${minT}</span> and <span class="pill">${maxT2}</span>. ` +
+        `Expected around <span class="pill">${expT}</span>. ` +
+        (state.currentBid ? `Current bid is <span class="pill">${state.currentBid}</span>.` : `No bid yet — start low.`);
+    } else {
+      $("hint").textContent = "New Game to play again.";
+    }
+  }
+
+  function revealAndResolveChallenge(caller, bidder, bidValue) {
+    const alive = alivePlayers();
+    const total = alive.reduce((acc,p)=>acc + sum(p.cards), 0);
+
+    addLog(`>>> ${caller.name} CALLS ${bidder.name} on bid ${bidValue}.`);
+    addLog(`Reveal:`);
+    for (const p of alive) addLog(`  ${p.name}: ${p.cards[0]} + ${p.cards[1]} = ${sum(p.cards)}`);
+    addLog(`TOTAL = ${total}`);
+
+    if (total >= bidValue) {
+      addLog(`Result: TOTAL (${total}) ≥ BID (${bidValue}) → ${caller.name} is eliminated.`);
+      caller.alive = false;
+      state.startIndex = nextAliveIndex(caller.id);
+    } else {
+      addLog(`Result: TOTAL (${total}) < BID (${bidValue}) → ${bidder.name} is eliminated.`);
+      bidder.alive = false;
+      state.startIndex = nextAliveIndex(bidder.id);
+    }
+
+    if (isGameOver()) {
+      const winner = alivePlayers()[0];
+      addLog(`*** GAME OVER: ${winner.name} wins! ***`);
+      return;
+    }
+
+    state.turnIndex = state.startIndex;
+    dealRound();
+  }
+
+  function doRaise(player, newBid) {
+    const minBid = state.currentBid + 1;
+    const maxBid = maxPossibleTotal();
+    if (!(Number.isInteger(newBid) && newBid >= minBid && newBid <= maxBid)) {
+      addLog(`(Invalid bid: ${newBid}. Must be ${minBid}..${maxBid})`);
+      return false;
+    }
+    state.currentBid = newBid;
+    state.lastBidder = player;
+    addLog(`${player.name} bids ${newBid}.`);
+    state.turnIndex = nextAliveIndex(player.id);
+    return true;
+  }
+
+  function doCall(player) {
+    if (state.currentBid === 0 || !state.lastBidder) return false;
+    revealAndResolveChallenge(player, state.lastBidder, state.currentBid);
+    return true;
+  }
+
+  // --- AI ---
+  function aiTakeTurn(ai) {
+    const style = $("aiStyle").value; // safe | balanced | spicy
+    const minT = minPossibleTotalFor(ai);
+    const maxT = maxPossibleTotalFor(ai);
+    const expT = expectedTotalFor(ai);
+
+    if (state.currentBid === 0) {
+      const opener = Math.max(1, Math.floor(expT * 0.5));
+      doRaise(ai, opener);
+      return;
+    }
+
+    const bid = state.currentBid;
+
+    // Impossible given their own cards? Call.
+    if (bid > maxT) { doCall(ai); return; }
+
+    let callBias = 0;
+    if (style === "safe") callBias = 3;
+    if (style === "balanced") callBias = 1;
+    if (style === "spicy") callBias = -1;
+
+    const margin = bid - expT;
+    const callChance = Math.max(0, Math.min(0.9, (margin + callBias) / 8));
+
+    if (Math.random() < callChance) { doCall(ai); return; }
+
+    const maxTotal = maxPossibleTotal();
+    let step = 1 + Math.floor(Math.random() * 3);
+    if (style === "spicy" && Math.random() < 0.35) step = 2 + Math.floor(Math.random() * 4);
+
+    let nextBid = bid + step;
+    const softCap = Math.max(bid + 1, Math.min(maxTotal, Math.floor(expT + 4)));
+    if (nextBid > softCap && Math.random() < 0.7) nextBid = softCap;
+
+    nextBid = Math.max(bid + 1, Math.min(maxTotal, nextBid));
+    doRaise(ai, nextBid);
+  }
+
+  function advanceIfAITurn() {
+    if (!state || isGameOver()) return;
+    const current = state.players[state.turnIndex];
+    if (!current || !current.alive) return;
+
+    if (!current.isYou) {
+      setTimeout(() => {
+        aiTakeTurn(current);
+        render();
+        advanceIfAITurn();
+      }, 350);
+    }
+  }
+
+  function newGame() {
+    const n = Number($("playerCount").value);
+    state = {
+      players: makePlayers(n),
+      round: 0,
+      currentBid: 0,
+      lastBidder: null,
+      startIndex: 0,
+      turnIndex: 0,
+      deck: [],
+    };
+
+    logEl.textContent = "";
+    addLog(`New game: ${n} players.`);
+    addLog(`Deck: values 1–10, two copies each (20 cards). Deal 2 per alive player each round.`);
+    addLog(`Bid must increase; call to challenge; loser eliminated; last alive wins.`);
+
+    state.startIndex = 0;
+    state.turnIndex = 0;
+    dealRound();
+    render();
+    advanceIfAITurn();
+  }
+
+  // --- UI handlers ---
+  $("newGameBtn").addEventListener("click", () => newGame());
+
+  $("raiseBtn").addEventListener("click", () => {
+    const you = state.players[0];
+    if (!you.alive) return;
+    const val = Number($("bidInput").value);
+    if (doRaise(you, val)) {
+      render();
+      advanceIfAITurn();
+    } else {
+      render();
+    }
+  });
+
+  $("callBtn").addEventListener("click", () => {
+    const you = state.players[0];
+    if (!you.alive) return;
+    doCall(you);
+    render();
+    advanceIfAITurn();
+  });
+
+  $("autoBtn").addEventListener("click", () => {
+    const you = state.players[0];
+    if (!you.alive) return;
+
+    if (state.currentBid === 0) {
+      const expT = expectedTotalFor(you);
+      doRaise(you, Math.max(1, Math.floor(expT * 0.55)));
+    } else {
+      const maxT = maxPossibleTotalFor(you);
+      const expT = expectedTotalFor(you);
+      const bid = state.currentBid;
+
+      if (bid > maxT) doCall(you);
+      else if (bid > expT + 4) doCall(you);
+      else doRaise(you, Math.min(maxPossibleTotal(), bid + 1));
+    }
+
+    render();
+    advanceIfAITurn();
+  });
+
+  // Start
+  newGame();
+})();
+</script>
+</body>
+</html>
